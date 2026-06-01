@@ -1,0 +1,75 @@
+--- vllm_modifications/original/qwen3_5.py      2026-06-01 14:53:54.728416000 +0000
++++ vllm_modifications/modified/qwen3_5.py      2026-06-01 15:25:42.880678000 +0000
+@@ -328,6 +328,12 @@
+ 
+         self.config = config
+ 
++        #############
++        self.use_jump_lens = True
++        self.jump_from = 24
++        self.jump_to = 30
++        #############
++
+         self.vocab_size = config.vocab_size
+ 
+         self.embed_tokens = VocabParallelEmbedding(
+@@ -356,6 +362,43 @@
+ 
+         self.aux_hidden_state_layers: tuple[int, ...] = ()
+ 
++
++        self.jump_lens = None
++
++        if self.use_jump_lens:
++            
++            self.jump_lens = nn.Linear(
++                config.hidden_size,
++                config.hidden_size,
++                bias=True,
++            )
++
++            jump_lens_path = hf_hub_download(
++                repo_id="ExplosionNuclear/JumpX",
++                filename="checkpoints/step_2000_24_30.pt",
++                revision="main",
++            )
++
++            sd = torch.load(
++                jump_lens_path,
++                map_location="cpu",
++                weights_only=True,
++            )
++
++            key = str(self.jump_from)
++
++            with torch.no_grad():
++                self.jump_lens.weight.copy_(
++                    sd[f"{key}.weight"].to(dtype=self.jump_lens.weight.dtype)
++                )
++                self.jump_lens.bias.copy_(
++                    sd[f"{key}.bias"].to(dtype=self.jump_lens.bias.dtype)
++                )
++
++            self.jump_lens.requires_grad_(False)
++
++
++
+     def load_fused_expert_weights(
+         self,
+         name: str,
+@@ -533,6 +576,17 @@
+                     )
+                     weight_loader(param, loaded_weight)
+             loaded_params.add(name)
++
++
++        
++        loaded_params.add("jump_lens.weight")
++        loaded_params.add("jump_lens.bias")
++
++    
++        ref = self.layers[0].input_layernorm.weight
++        self.jump_lens.to(device=ref.device, dtype=ref.dtype)
++
++
+         return loaded_params

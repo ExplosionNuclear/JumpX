@@ -1,0 +1,39 @@
+--- vllm_modifications/original/qwen3_next.py   2026-06-01 14:55:55.861334000 +0000
++++ vllm_modifications/modified/qwen3_next.py   2026-06-01 15:28:39.149759000 +0000
+@@ -1378,16 +1378,36 @@
+             islice(self.layers, self.start_layer, self.end_layer),
+             start=self.start_layer,
+         ):
++        
++            # -----------------------------
++            # skip only layers strictly between jump_from and jump_to
++            # example: jump_from=24, jump_to=30 -> skip 25..29
++
++            if self.use_jump_lens and self.jump_from < layer_idx < self.jump_to:
++                continue
++            
+             if layer_idx in self.aux_hidden_state_layers:
+                 aux_hidden_states.append(
+                     hidden_states + residual if residual is not None else hidden_states
+                 )
++
+             hidden_states, residual = layer(
+                 positions=positions,
+                 hidden_states=hidden_states,
+                 residual=residual,
+             )
+ 
++            # apply JumpLens AFTER executing jump_from layer
++            if self.use_jump_lens and layer_idx == self.jump_from:
++
++                x = hidden_states + residual if residual is not None else hidden_states
++
++                hidden_states = self.jump_lens(x)
++                residual = None
++            
++            # ---------------------------------
++
++
+         if not get_pp_group().is_last_rank:
+             return IntermediateTensors(
+                 {"hidden_states": hidden_states, "residual": residual}
